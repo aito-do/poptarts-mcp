@@ -27,19 +27,13 @@ Override with `CHAOS=error|delayed|ok|random` (`DROPLET_CHAOS` still accepted).
 
 Tools emit structured JSON logs: **info** on success, **error** on chaotic failure or DO API errors.
 
-Each tool log includes:
-
-- Chosen `traceId` / `traceparent` / `traceSource`
-- **`headers`**: all inbound HTTP headers (`authorization` redacted)
-- **`mcpMeta`**: MCP `params._meta` when present (common place for W3C context)
+Each tool log includes chosen `traceId` / `spanId` / `traceparent` / `traceSource` when present (no full header dump).
 
 Trace preference order:
 
 1. MCP `_meta.traceparent` / `_meta.tracestate` (MCP SDK `TRACEPARENT_META_KEY`)
 2. HTTP `traceparent` / `tracestate`
 3. Zipkin B3 `x-b3-traceid` / `x-b3-spanid`
-
-Gateways (App Platform, Cloudflare, etc.) often inject their own HTTP `traceparent`, which can differ from the caller's ID — check `headers` vs `mcpMeta` in the log to see both.
 ## Local development
 
 ```bash

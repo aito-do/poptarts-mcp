@@ -4,7 +4,6 @@ import { proxyGetDroplet, proxyListDroplets } from "./droplet-proxy.js";
 import { getRandomFlavorResult } from "./flavor-result.js";
 import {
   extractTraceContext,
-  flattenHeaders,
   runWithRequestContext,
 } from "./trace.js";
 
@@ -29,7 +28,6 @@ function withRequestContext<T>(
   },
   fn: () => Promise<T>,
 ): Promise<T> {
-  const headers = flattenHeaders(ctx.http?.req?.headers);
   const mcpMeta =
     ctx.mcpReq?._meta && typeof ctx.mcpReq._meta === "object"
       ? (ctx.mcpReq._meta as Record<string, unknown>)
@@ -38,7 +36,7 @@ function withRequestContext<T>(
     headers: ctx.http?.req?.headers,
     mcpMeta,
   });
-  return runWithRequestContext({ trace, headers, mcpMeta }, fn);
+  return runWithRequestContext({ trace }, fn);
 }
 
 export function createServer(): McpServer {

@@ -17,10 +17,6 @@ export type TraceContext = {
 
 type RequestStore = {
   trace: TraceContext;
-  /** All inbound HTTP headers (Authorization redacted). */
-  headers?: Record<string, string>;
-  /** MCP params._meta when present. */
-  mcpMeta?: Record<string, unknown>;
 };
 
 const als = new AsyncLocalStorage<RequestStore>();
@@ -28,8 +24,6 @@ const als = new AsyncLocalStorage<RequestStore>();
 /** W3C Trace Context: `version-traceid-spanid-flags` (trace-id = 32 hex). */
 const TRACEPARENT_RE =
   /^([\da-f]{2})-([\da-f]{32})-([\da-f]{16})-([\da-f]{2})$/i;
-
-const REDACT_HEADER = /^(authorization|cookie|set-cookie|x-api-key|proxy-authorization)$/i;
 
 function headerValue(
   headers: Headers | Record<string, string | string[] | undefined>,
@@ -43,31 +37,6 @@ function headerValue(
   const raw = record[name] ?? record[name.toLowerCase()];
   if (Array.isArray(raw)) return raw[0]?.trim() || undefined;
   return raw?.trim() || undefined;
-}
-
-/** Flatten inbound headers for logging; redact secrets. */
-export function flattenHeaders(
-  headers: Headers | Record<string, string | string[] | undefined> | undefined,
-): Record<string, string> {
-  if (!headers) return {};
-
-  const out: Record<string, string> = {};
-
-  if (typeof (headers as Headers).forEach === "function") {
-    (headers as Headers).forEach((value, key) => {
-      out[key.toLowerCase()] = REDACT_HEADER.test(key) ? "[redacted]" : value;
-    });
-    return out;
-  }
-
-  for (const [key, raw] of Object.entries(
-    headers as Record<string, string | string[] | undefined>,
-  )) {
-    if (raw === undefined) continue;
-    const value = Array.isArray(raw) ? raw.join(", ") : raw;
-    out[key.toLowerCase()] = REDACT_HEADER.test(key) ? "[redacted]" : value;
-  }
-  return out;
 }
 
 function parseTraceparent(
@@ -173,7 +142,7 @@ export function getTraceContext(): TraceContext {
   return als.getStore()?.trace ?? {};
 }
 
-/** Flat fields suitable for structured logs. */
+/** Flat fields suitable for structured logs (trace/span only — no header dump). */
 export function traceLogFields(
   store: RequestStore | undefined = getRequestStore(),
 ): Record<string, unknown> {
@@ -185,7 +154,5 @@ export function traceLogFields(
   if (trace.tracestate) fields.tracestate = trace.tracestate;
   if (trace.baggage) fields.baggage = trace.baggage;
   if (trace.traceSource) fields.traceSource = trace.traceSource;
-  if (store?.headers) fields.headers = store.headers;
-  if (store?.mcpMeta) fields.mcpMeta = store.mcpMeta;
   return fields;
 }

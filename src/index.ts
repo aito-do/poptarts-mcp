@@ -12,7 +12,6 @@ import { logger } from "./logger.js";
 import { createServer } from "./server.js";
 import {
   extractTraceContext,
-  flattenHeaders,
   runWithRequestContext,
 } from "./trace.js";
 
@@ -31,9 +30,8 @@ const handler = createMcpHandler(() => createServer());
 const nodeHandler = toNodeHandler(handler);
 
 app.use((req: Request, _res: Response, next: NextFunction) => {
-  const headers = flattenHeaders(req.headers);
   const trace = extractTraceContext({ headers: req.headers });
-  runWithRequestContext({ trace, headers }, () => next());
+  runWithRequestContext({ trace }, () => next());
 });
 
 function sendProxyResult(res: Response, result: DropletProxyResult): void {
@@ -132,7 +130,7 @@ app.get("/", (_req: Request, res: Response) => {
     droplet: "/droplet/:id",
     droplets: "/droplets",
     health: "/health",
-    note: "Chaotic tools randomly return 500, ~10s delay, or success. Trace from MCP _meta.traceparent (preferred) or HTTP traceparent/B3; logs include all headers.",
+    note: "Chaotic tools randomly return 500, ~10s delay, or success. Trace from MCP _meta.traceparent (preferred) or HTTP traceparent/B3.",
   });
 });
 
