@@ -1,28 +1,29 @@
 import { applyChaosDelay, pickChaosOutcome, type ChaosOutcome } from "./chaos.js";
-import { DoApiError, getDroplet } from "./do-client.js";
+import { DoApiError, getDroplet, listDroplets } from "./do-client.js";
+import { logger } from "./logger.js";
 
-export type DropletProxySuccess = {
+type ProxyBase = {
+  outcome: ChaosOutcome;
+  delayMs: number;
+};
+
+export type DropletProxySuccess = ProxyBase & {
   ok: true;
   outcome: Exclude<ChaosOutcome, "error">;
-  delayMs: number;
-  dropletId: number;
   data: unknown;
 };
 
-export type DropletProxyChaosError = {
+export type DropletProxyChaosError = ProxyBase & {
   ok: false;
   outcome: "error";
   delayMs: 0;
-  dropletId: number;
   error: "chaotic_failure";
   message: string;
 };
 
-export type DropletProxyApiError = {
+export type DropletProxyApiError = ProxyBase & {
   ok: false;
   outcome: Exclude<ChaosOutcome, "error">;
-  delayMs: number;
-  dropletId: number;
   error: "do_api_error";
   status: number;
   message: string;
@@ -34,11 +35,47 @@ export type DropletProxyResult =
   | DropletProxyChaosError
   | DropletProxyApiError;
 
-/**
- * Proxy droplet-get (DigitalOcean droplets MCP equivalent) with chaotic
- * outcomes: simulated 500, delayed success, or immediate success.
- */
-export async function proxyGetDroplet(dropletId: number): Promise<DropletProxyResult> {
+export type GetDropletResult = DropletProxyResult & { op: "get_droplet"; dropletId: number };
+export type ListDropletsResult = DropletProxyResult & {
+  op: "list_droplets";
+  page: number;
+  perPage: number;
+};
+
+function logProxyResult(
+  op: string,
+  result: DropletProxyResult,
+  extra: Record<string, unknown>,
+): void {
+  const fields = {
+    op,
+    outcome: result.outcome,
+    delayMs: result.delayMs,
+    ok: result.ok,
+    ...extra,
+  };
+
+  if (result.ok) {
+    logger.info(`${op} succeeded`, fields);
+    return;
+  }
+
+  if (result.error === "chaotic_failure") {
+    logger.error(`${op} chaotic failure`, { ...fields, error: result.error });
+    return;
+  }
+
+  logger.error(`${op} API error`, {
+    ...fields,
+    error: result.error,
+    status: result.status,
+    message: result.message,
+  });
+}
+
+async function runChaoticFetch(
+  fetchData: () => Promise<unknown>,
+): Promise<DropletProxyResult> {
   const outcome = pickChaosOutcome();
 
   if (outcome === "error") {
@@ -46,7 +83,6 @@ export async function proxyGetDroplet(dropletId: number): Promise<DropletProxyRe
       ok: false,
       outcome: "error",
       delayMs: 0,
-      dropletId,
       error: "chaotic_failure",
       message: "Simulated failure from droplet proxy",
     };
@@ -55,12 +91,11 @@ export async function proxyGetDroplet(dropletId: number): Promise<DropletProxyRe
   const delayMs = await applyChaosDelay(outcome);
 
   try {
-    const data = await getDroplet(dropletId);
+    const data = await fetchData();
     return {
       ok: true,
       outcome,
       delayMs,
-      dropletId,
       data,
     };
   } catch (err) {
@@ -69,7 +104,6 @@ export async function proxyGetDroplet(dropletId: number): Promise<DropletProxyRe
         ok: false,
         outcome,
         delayMs,
-        dropletId,
         error: "do_api_error",
         status: err.status,
         message: err.message,
@@ -78,4 +112,35 @@ export async function proxyGetDroplet(dropletId: number): Promise<DropletProxyRe
     }
     throw err;
   }
+}
+
+/**
+ * Proxy droplet-get (DigitalOcean droplets MCP equivalent) with chaotic
+ * outcomes: simulated 500, delayed success, or immediate success.
+ */
+export async function proxyGetDroplet(dropletId: number): Promise<GetDropletResult> {
+  const result = await runChaoticFetch(() => getDroplet(dropletId));
+  const wrapped: GetDropletResult = { ...result, op: "get_droplet", dropletId };
+  logProxyResult("get_droplet", result, { dropletId });
+  return wrapped;
+}
+
+/**
+ * Proxy droplet-list with the same chaotic outcomes as get.
+ */
+export async function proxyListDroplets(options: {
+  page?: number;
+  perPage?: number;
+} = {}): Promise<ListDropletsResult> {
+  const page = options.page ?? 1;
+  const perPage = options.perPage ?? 50;
+  const result = await runChaoticFetch(() => listDroplets({ page, perPage }));
+  const wrapped: ListDropletsResult = {
+    ...result,
+    op: "list_droplets",
+    page,
+    perPage,
+  };
+  logProxyResult("list_droplets", result, { page, perPage });
+  return wrapped;
 }

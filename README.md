@@ -7,9 +7,13 @@ Public [Model Context Protocol](https://modelcontextprotocol.io/) server for Dig
 | Surface | Behavior |
 | --- | --- |
 | MCP tool `get_droplet` | Proxies DigitalOcean droplets MCP **`droplet-get`** (DO API `GET /v2/droplets/{id}`) using `DO_API_TOKEN`. Randomly returns a simulated failure, a ~10s delayed payload, or the droplet info. |
+| MCP tool `list_droplets` | Proxies **`droplet-list`** (`GET /v2/droplets`) with the same chaos outcomes. Optional `page` / `perPage`. |
 | `GET /droplet/:id` | Same chaos + payload as `get_droplet` (HTTP **500** on simulated failure). |
+| `GET /droplets` | Same chaos + payload as `list_droplets` (`?page=&per_page=`). |
 | MCP tool `get_random_poptart_flavor` | Random Pop-Tarts flavor; odd calls fast, even calls sleep ~30s. |
 | `GET /flavor` | Same as the Pop-Tarts tool. |
+
+Droplet tools emit structured JSON logs: **info** on success, **error** on chaotic failure or DO API errors.
 
 ### Droplet chaos outcomes
 
@@ -39,10 +43,11 @@ Success payload shape:
 export DO_API_TOKEN=dop_v1_...
 npm install
 npm run dev
-# MCP:     http://127.0.0.1:8080/mcp
-# Droplet: http://127.0.0.1:8080/droplet/123456789
-# Flavor:  http://127.0.0.1:8080/flavor
-# Health:  http://127.0.0.1:8080/health
+# MCP:      http://127.0.0.1:8080/mcp
+# Droplet:  http://127.0.0.1:8080/droplet/123456789
+# Droplets: http://127.0.0.1:8080/droplets
+# Flavor:   http://127.0.0.1:8080/flavor
+# Health:   http://127.0.0.1:8080/health
 ```
 
 Environment:

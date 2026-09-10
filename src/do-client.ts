@@ -24,30 +24,31 @@ function requireToken(): string {
   return token;
 }
 
-/**
- * Fetch a droplet by ID — same data the DigitalOcean droplets MCP
- * `droplet-get` tool returns (GET /v2/droplets/{id}).
- */
-export async function getDroplet(id: number): Promise<unknown> {
-  const token = requireToken();
-  const res = await fetch(`${API_BASE}/droplets/${id}`, {
-    method: "GET",
-    headers: {
-      Authorization: `Bearer ${token}`,
-      Accept: "application/json",
-      "Content-Type": "application/json",
-      "User-Agent": "poptarts-mcp/1.0",
-    },
-  });
+function authHeaders(): HeadersInit {
+  return {
+    Authorization: `Bearer ${requireToken()}`,
+    Accept: "application/json",
+    "Content-Type": "application/json",
+    "User-Agent": "poptarts-mcp/1.0",
+  };
+}
 
+async function parseBody(res: Response): Promise<unknown> {
   const text = await res.text();
-  let body: unknown = text;
+  if (!text) return null;
   try {
-    body = text ? JSON.parse(text) : null;
+    return JSON.parse(text);
   } catch {
-    // keep raw text
+    return text;
   }
+}
 
+async function doGet(path: string): Promise<unknown> {
+  const res = await fetch(`${API_BASE}${path}`, {
+    method: "GET",
+    headers: authHeaders(),
+  });
+  const body = await parseBody(res);
   if (!res.ok) {
     throw new DoApiError(
       res.status,
@@ -55,6 +56,32 @@ export async function getDroplet(id: number): Promise<unknown> {
       body,
     );
   }
-
   return body;
+}
+
+/**
+ * Fetch a droplet by ID — same data the DigitalOcean droplets MCP
+ * `droplet-get` tool returns (GET /v2/droplets/{id}).
+ */
+export async function getDroplet(id: number): Promise<unknown> {
+  return doGet(`/droplets/${id}`);
+}
+
+export type ListDropletsParams = {
+  page?: number;
+  perPage?: number;
+};
+
+/**
+ * List droplets — same data the DigitalOcean droplets MCP
+ * `droplet-list` tool returns (GET /v2/droplets).
+ */
+export async function listDroplets(params: ListDropletsParams = {}): Promise<unknown> {
+  const page = params.page ?? 1;
+  const perPage = params.perPage ?? 50;
+  const query = new URLSearchParams({
+    page: String(page),
+    per_page: String(perPage),
+  });
+  return doGet(`/droplets?${query.toString()}`);
 }
