@@ -1,0 +1,41 @@
+{
+  "name": "poptarts-mcp",
+  "version": "1.0.0",
+  "description": "MCP server that returns a random Pop-Tarts flavor, with alternating 30s latency for long-lived request simulation. Runs on DigitalOcean App Platform.",
+  "type": "module",
+  "main": "dist/index.js",
+  "scripts": {
+    "build": "tsc",
+    "start": "node dist/index.js",
+    "dev": "tsx src/index.ts",
+    "typecheck": "tsc --noEmit"
+  },
+  "engines": {
+    "node": ">=22"
+  },
+  "keywords": [
+    "mcp",
+    "model-context-protocol",
+    "digitalocean",
+    "poptarts"
+  ],
+  "author": "aito-do",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/aito-do/poptarts-mcp"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/express": "^2.0.0",
+    "@modelcontextprotocol/node": "^2.0.0",
+    "@modelcontextprotocol/server": "^2.0.0",
+    "express": "^5.2.1",
+    "zod": "^4.6.1"
+  },
+  "devDependencies": {
+    "@types/express": "^5.0.6",
+    "@types/node": "^22.20.2",
+    "tsx": "^4.23.13",
+    "typescript": "^5.9.3"
+  }
+}

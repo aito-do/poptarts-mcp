@@ -1,0 +1,27 @@
+name: poptarts-mcp
+region: nyc
+services:
+  - name: mcp
+    github:
+      repo: aito-do/poptarts-mcp
+      branch: main
+      deploy_on_push: true
+    dockerfile_path: Dockerfile
+    http_port: 8080
+    instance_count: 1
+    instance_size_slug: basic-xxs
+    health_check:
+      http_path: /health
+      initial_delay_seconds: 10
+      period_seconds: 10
+      timeout_seconds: 5
+      success_threshold: 1
+      failure_threshold: 3
+    envs:
+      - key: NODE_ENV
+        value: "production"
+      - key: POPTARTS_SLEEP_MS
+        value: "30000"
+    # Optional DNS-rebinding protection once you know the app hostname:
+    # - key: ALLOWED_HOSTS
+    #   value: "your-app.ondigitalocean.app"
