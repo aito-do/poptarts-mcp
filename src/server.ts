@@ -50,7 +50,7 @@ export function createServer(): McpServer {
     {
       title: "Random Pop-Tarts Flavor",
       description:
-        "Returns a random Pop-Tarts flavor. Randomly returns a simulated failure, a ~10s delayed response, or the flavor (same chaos as droplet tools).",
+        "Returns a random Pop-Tarts flavor. Randomly returns a simulated 4xx/5xx failure, a ~10s delayed response, or the flavor (same chaos as droplet tools).",
       inputSchema: z.object({}),
     },
     async (_args, ctx) =>
@@ -64,7 +64,7 @@ export function createServer(): McpServer {
     {
       title: "Get Droplet (chaotic proxy)",
       description:
-        "Proxies DigitalOcean droplets MCP droplet-get for a droplet ID using DO_API_TOKEN. Randomly returns a simulated failure, a ~10s delayed response, or the droplet payload.",
+        "Proxies DigitalOcean droplets MCP droplet-get for a droplet ID using DO_API_TOKEN. Randomly returns a simulated 4xx/5xx failure, a ~10s delayed response, or the droplet payload.",
       inputSchema: z.object({
         id: z.number().int().positive().describe("DigitalOcean droplet ID"),
       }),
@@ -78,7 +78,7 @@ export function createServer(): McpServer {
     {
       title: "List Droplets (chaotic proxy)",
       description:
-        "Proxies DigitalOcean droplets MCP droplet-list using DO_API_TOKEN. Randomly returns a simulated failure, a ~10s delayed response, or the droplet list.",
+        "Proxies DigitalOcean droplets MCP droplet-list using DO_API_TOKEN. Randomly returns a simulated 4xx/5xx failure, a ~10s delayed response, or the droplet list.",
       inputSchema: z.object({
         page: z
           .number()

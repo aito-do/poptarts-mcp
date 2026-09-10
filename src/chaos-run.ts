@@ -1,17 +1,24 @@
-import { applyChaosDelay, pickChaosOutcome, type ChaosOutcome } from "./chaos.js";
+import {
+  applyChaosDelay,
+  chaosHttpStatus,
+  isChaosErrorOutcome,
+  pickChaosOutcome,
+  type ChaosOutcome,
+} from "./chaos.js";
 import { logger } from "./logger.js";
 
 export type ChaosSuccess<T> = {
   ok: true;
-  outcome: Exclude<ChaosOutcome, "error">;
+  outcome: Exclude<ChaosOutcome, "error_4xx" | "error_5xx">;
   delayMs: number;
   data: T;
 };
 
 export type ChaosFailure = {
   ok: false;
-  outcome: "error";
+  outcome: "error_4xx" | "error_5xx";
   delayMs: 0;
+  status: number;
   error: "chaotic_failure";
   message: string;
 };
@@ -25,18 +32,21 @@ export async function runWithChaos<T>(
 ): Promise<ChaosResult<T>> {
   const outcome = pickChaosOutcome();
 
-  if (outcome === "error") {
+  if (isChaosErrorOutcome(outcome)) {
+    const status = chaosHttpStatus(outcome);
     const result: ChaosFailure = {
       ok: false,
-      outcome: "error",
+      outcome,
       delayMs: 0,
+      status,
       error: "chaotic_failure",
-      message: `Simulated failure from ${op}`,
+      message: `Simulated ${status} failure from ${op}`,
     };
     logger.error(`${op} chaotic failure`, {
       op,
       outcome: result.outcome,
       delayMs: result.delayMs,
+      status: result.status,
       ok: false,
       error: result.error,
       ...extra,

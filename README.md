@@ -15,13 +15,14 @@ Public [Model Context Protocol](https://modelcontextprotocol.io/) server for Dig
 
 ### Chaos outcomes
 
-Each chaotic request independently picks one of:
+Each chaotic request independently picks one of (~25% each):
 
-1. **error** — simulated failure (`500` on HTTP; MCP `isError`)
-2. **delayed** — sleep ~10s, then succeed
-3. **ok** — succeed immediately
+1. **error_4xx** — simulated client error (`400` / `401` / `403` / `404` / `429`)
+2. **error_5xx** — simulated server error (`500` / `502` / `503`)
+3. **delayed** — sleep ~10s, then succeed
+4. **ok** — succeed immediately
 
-Override with `CHAOS=error|delayed|ok|random` (`DROPLET_CHAOS` still accepted).
+Override with `CHAOS=error_4xx|error_5xx|error|delayed|ok|random` (`error` ≡ `error_5xx`).
 
 ### Logging + tracing
 
@@ -52,7 +53,7 @@ Environment:
 | Variable | Default | Meaning |
 | --- | --- | --- |
 | `DO_API_TOKEN` | _(required for droplet)_ | DigitalOcean personal access token (Bearer) |
-| `CHAOS` | `random` | Force `error`, `delayed`, `ok`, or `random` |
+| `CHAOS` | `random` | Force `error_4xx`, `error_5xx`, `error`, `delayed`, `ok`, or `random` |
 | `CHAOS_DELAY_MS` | `10000` | Sleep when outcome is `delayed` |
 | `DROPLET_CHAOS` / `DROPLET_CHAOS_DELAY_MS` | — | Legacy aliases for `CHAOS` / `CHAOS_DELAY_MS` |
 | `PORT` | `8080` | HTTP listen port |

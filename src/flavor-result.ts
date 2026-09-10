@@ -12,8 +12,9 @@ export type FlavorSuccess = {
 export type FlavorChaosError = {
   ok: false;
   op: "get_random_poptart_flavor";
-  outcome: "error";
+  outcome: "error_4xx" | "error_5xx";
   delayMs: 0;
+  status: number;
   error: "chaotic_failure";
   message: string;
 };
@@ -30,8 +31,9 @@ export async function getRandomFlavorResult(): Promise<FlavorResult> {
     return {
       ok: false,
       op: "get_random_poptart_flavor",
-      outcome: "error",
+      outcome: chaos.outcome,
       delayMs: 0,
+      status: chaos.status,
       error: chaos.error,
       message: chaos.message,
     };

@@ -1,4 +1,10 @@
-import { applyChaosDelay, pickChaosOutcome, type ChaosOutcome } from "./chaos.js";
+import {
+  applyChaosDelay,
+  chaosHttpStatus,
+  isChaosErrorOutcome,
+  pickChaosOutcome,
+  type ChaosOutcome,
+} from "./chaos.js";
 import { DoApiError, getDroplet, listDroplets } from "./do-client.js";
 import { logger } from "./logger.js";
 
@@ -9,21 +15,22 @@ type ProxyBase = {
 
 export type DropletProxySuccess = ProxyBase & {
   ok: true;
-  outcome: Exclude<ChaosOutcome, "error">;
+  outcome: Exclude<ChaosOutcome, "error_4xx" | "error_5xx">;
   data: unknown;
 };
 
 export type DropletProxyChaosError = ProxyBase & {
   ok: false;
-  outcome: "error";
+  outcome: "error_4xx" | "error_5xx";
   delayMs: 0;
+  status: number;
   error: "chaotic_failure";
   message: string;
 };
 
 export type DropletProxyApiError = ProxyBase & {
   ok: false;
-  outcome: Exclude<ChaosOutcome, "error">;
+  outcome: Exclude<ChaosOutcome, "error_4xx" | "error_5xx">;
   error: "do_api_error";
   status: number;
   message: string;
@@ -61,7 +68,11 @@ function logProxyResult(
   }
 
   if (result.error === "chaotic_failure") {
-    logger.error(`${op} chaotic failure`, { ...fields, error: result.error });
+    logger.error(`${op} chaotic failure`, {
+      ...fields,
+      error: result.error,
+      status: result.status,
+    });
     return;
   }
 
@@ -78,13 +89,15 @@ async function runChaoticFetch(
 ): Promise<DropletProxyResult> {
   const outcome = pickChaosOutcome();
 
-  if (outcome === "error") {
+  if (isChaosErrorOutcome(outcome)) {
+    const status = chaosHttpStatus(outcome);
     return {
       ok: false,
-      outcome: "error",
+      outcome,
       delayMs: 0,
+      status,
       error: "chaotic_failure",
-      message: "Simulated failure from droplet proxy",
+      message: `Simulated ${status} failure from droplet proxy`,
     };
   }
 
@@ -115,8 +128,8 @@ async function runChaoticFetch(
 }
 
 /**
- * Proxy droplet-get (DigitalOcean droplets MCP equivalent) with chaotic
- * outcomes: simulated 500, delayed success, or immediate success.
+ * Proxy droplet-get with chaotic outcomes: simulated 4xx/5xx, delayed
+ * success, or immediate success.
  */
 export async function proxyGetDroplet(dropletId: number): Promise<GetDropletResult> {
   const result = await runChaoticFetch(() => getDroplet(dropletId));

@@ -35,8 +35,8 @@ app.use((req: Request, _res: Response, next: NextFunction) => {
 });
 
 function sendProxyResult(res: Response, result: DropletProxyResult): void {
-  if (result.outcome === "error") {
-    res.status(500).json(result);
+  if (!result.ok && result.error === "chaotic_failure") {
+    res.status(result.status).json(result);
     return;
   }
 
@@ -63,7 +63,7 @@ app.get("/health", (_req: Request, res: Response) => {
 app.get("/flavor", async (_req: Request, res: Response) => {
   const result = await getRandomFlavorResult();
   if (!result.ok) {
-    res.status(500).json(result);
+    res.status(result.status).json(result);
     return;
   }
   res.status(200).json(result);
@@ -130,7 +130,7 @@ app.get("/", (_req: Request, res: Response) => {
     droplet: "/droplet/:id",
     droplets: "/droplets",
     health: "/health",
-    note: "Chaotic tools randomly return 500, ~10s delay, or success. Trace from MCP _meta.traceparent (preferred) or HTTP traceparent/B3.",
+    note: "Chaotic tools randomly return 4xx, 5xx, ~10s delay, or success. Trace from MCP _meta.traceparent (preferred) or HTTP traceparent/B3.",
   });
 });
 
