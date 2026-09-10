@@ -1,3 +1,5 @@
+import { getTraceContext, traceLogFields } from "./trace.js";
+
 type LogFields = Record<string, unknown>;
 
 function formatLine(level: "info" | "error", message: string, fields?: LogFields): string {
@@ -5,6 +7,7 @@ function formatLine(level: "info" | "error", message: string, fields?: LogFields
     level,
     msg: message,
     time: new Date().toISOString(),
+    ...traceLogFields(getTraceContext()),
     ...(fields ?? {}),
   };
   return JSON.stringify(payload);

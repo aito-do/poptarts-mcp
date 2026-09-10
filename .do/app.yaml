@@ -20,11 +20,9 @@ services:
     envs:
       - key: NODE_ENV
         value: "production"
-      - key: POPTARTS_SLEEP_MS
-        value: "30000"
-      - key: DROPLET_CHAOS
+      - key: CHAOS
         value: "random"
-      - key: DROPLET_CHAOS_DELAY_MS
+      - key: CHAOS_DELAY_MS
         value: "10000"
       - key: DO_API_TOKEN
         scope: RUN_TIME

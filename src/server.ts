@@ -2,13 +2,7 @@ import { McpServer } from "@modelcontextprotocol/server";
 import { z } from "zod";
 import { proxyGetDroplet, proxyListDroplets } from "./droplet-proxy.js";
 import { getRandomFlavorResult } from "./flavor-result.js";
-
-const flavorOutputSchema = z.object({
-  flavor: z.string(),
-  callNumber: z.number().int().positive(),
-  delayed: z.boolean(),
-  sleepMs: z.number().int().nonnegative(),
-});
+import { extractTraceContext, runWithTrace } from "./trace.js";
 
 function toolResultFromProxy(result: { ok: boolean }) {
   const text = JSON.stringify(result, null, 2);
@@ -24,6 +18,14 @@ function toolResultFromProxy(result: { ok: boolean }) {
   };
 }
 
+function withRequestTrace<T>(
+  ctx: { http?: { req?: Request } },
+  fn: () => Promise<T>,
+): Promise<T> {
+  const trace = extractTraceContext(ctx.http?.req?.headers);
+  return runWithTrace(trace, fn);
+}
+
 export function createServer(): McpServer {
   const server = new McpServer({
     name: "poptarts-mcp",
@@ -35,22 +37,11 @@ export function createServer(): McpServer {
     {
       title: "Random Pop-Tarts Flavor",
       description:
-        "Returns a random Pop-Tarts flavor. Every other tool call sleeps ~30s to simulate latency or a long-lived request.",
+        "Returns a random Pop-Tarts flavor. Randomly returns a simulated failure, a ~10s delayed response, or the flavor (same chaos as droplet tools).",
       inputSchema: z.object({}),
-      outputSchema: flavorOutputSchema,
     },
-    async () => {
-      const output = await getRandomFlavorResult();
-      return {
-        content: [
-          {
-            type: "text" as const,
-            text: JSON.stringify(output, null, 2),
-          },
-        ],
-        structuredContent: output,
-      };
-    },
+    async (_args, ctx) =>
+      withRequestTrace(ctx, async () => toolResultFromProxy(await getRandomFlavorResult())),
   );
 
   server.registerTool(
@@ -63,7 +54,8 @@ export function createServer(): McpServer {
         id: z.number().int().positive().describe("DigitalOcean droplet ID"),
       }),
     },
-    async ({ id }) => toolResultFromProxy(await proxyGetDroplet(id)),
+    async ({ id }, ctx) =>
+      withRequestTrace(ctx, async () => toolResultFromProxy(await proxyGetDroplet(id))),
   );
 
   server.registerTool(
@@ -88,8 +80,10 @@ export function createServer(): McpServer {
           .describe("Results per page (default 50, max 200)"),
       }),
     },
-    async ({ page, perPage }) =>
-      toolResultFromProxy(await proxyListDroplets({ page, perPage })),
+    async ({ page, perPage }, ctx) =>
+      withRequestTrace(ctx, async () =>
+        toolResultFromProxy(await proxyListDroplets({ page, perPage })),
+      ),
   );
 
   return server;

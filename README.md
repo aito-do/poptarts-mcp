@@ -6,34 +6,48 @@ Public [Model Context Protocol](https://modelcontextprotocol.io/) server for Dig
 
 | Surface | Behavior |
 | --- | --- |
-| MCP tool `get_droplet` | Proxies DigitalOcean droplets MCP **`droplet-get`** (DO API `GET /v2/droplets/{id}`) using `DO_API_TOKEN`. Randomly returns a simulated failure, a ~10s delayed payload, or the droplet info. |
-| MCP tool `list_droplets` | Proxies **`droplet-list`** (`GET /v2/droplets`) with the same chaos outcomes. Optional `page` / `perPage`. |
-| `GET /droplet/:id` | Same chaos + payload as `get_droplet` (HTTP **500** on simulated failure). |
-| `GET /droplets` | Same chaos + payload as `list_droplets` (`?page=&per_page=`). |
-| MCP tool `get_random_poptart_flavor` | Random Pop-Tarts flavor; odd calls fast, even calls sleep ~30s. |
-| `GET /flavor` | Same as the Pop-Tarts tool. |
+| MCP tool `get_droplet` | Proxies DigitalOcean droplets MCP **`droplet-get`** using `DO_API_TOKEN`, with chaos outcomes. |
+| MCP tool `list_droplets` | Proxies **`droplet-list`**. Optional `page` / `perPage`. |
+| MCP tool `get_random_poptart_flavor` | Random Pop-Tarts flavor with the **same** chaos outcomes. |
+| `GET /droplet/:id` | Same as `get_droplet` (HTTP **500** on simulated failure). |
+| `GET /droplets` | Same as `list_droplets` (`?page=&per_page=`). |
+| `GET /flavor` | Same as `get_random_poptart_flavor`. |
 
-Droplet tools emit structured JSON logs: **info** on success, **error** on chaotic failure or DO API errors.
+### Chaos outcomes
 
-### Droplet chaos outcomes
-
-Each droplet request independently picks one of:
+Each chaotic request independently picks one of:
 
 1. **error** — simulated failure (`500` on HTTP; MCP `isError`)
-2. **delayed** — sleep ~10s, then fetch the droplet
-3. **ok** — fetch the droplet immediately
+2. **delayed** — sleep ~10s, then succeed
+3. **ok** — succeed immediately
 
-Override with `DROPLET_CHAOS=error|delayed|ok|random`.
+Override with `CHAOS=error|delayed|ok|random` (`DROPLET_CHAOS` still accepted).
 
-Success payload shape:
+### Logging + tracing
+
+Tools emit structured JSON logs: **info** on success, **error** on chaotic failure or DO API errors.
+
+If the caller sends OpenTelemetry / distributed-trace headers, `traceId` (and related fields) are included in the log body:
+
+| Header | Source |
+| --- | --- |
+| `traceparent` / `tracestate` | W3C Trace Context (OTel default) |
+| `x-b3-traceid` / `x-b3-spanid` | Zipkin B3 (fallback) |
+
+Example log line:
 
 ```json
 {
-  "ok": true,
-  "outcome": "delayed",
-  "delayMs": 10000,
-  "dropletId": 123456,
-  "data": { "droplet": { "...": "..." } }
+  "level": "info",
+  "msg": "get_random_poptart_flavor succeeded",
+  "time": "2026-09-10T03:50:00.000Z",
+  "traceId": "0af7651916cd43dd8448eb211c80319c",
+  "spanId": "b7ad6b7169203331",
+  "traceparent": "00-0af7651916cd43dd8448eb211c80319c-b7ad6b7169203331-01",
+  "op": "get_random_poptart_flavor",
+  "outcome": "ok",
+  "delayMs": 0,
+  "ok": true
 }
 ```
 
@@ -55,10 +69,10 @@ Environment:
 | Variable | Default | Meaning |
 | --- | --- | --- |
 | `DO_API_TOKEN` | _(required for droplet)_ | DigitalOcean personal access token (Bearer) |
-| `DROPLET_CHAOS` | `random` | Force `error`, `delayed`, `ok`, or `random` |
-| `DROPLET_CHAOS_DELAY_MS` | `10000` | Sleep when outcome is `delayed` |
+| `CHAOS` | `random` | Force `error`, `delayed`, `ok`, or `random` |
+| `CHAOS_DELAY_MS` | `10000` | Sleep when outcome is `delayed` |
+| `DROPLET_CHAOS` / `DROPLET_CHAOS_DELAY_MS` | — | Legacy aliases for `CHAOS` / `CHAOS_DELAY_MS` |
 | `PORT` | `8080` | HTTP listen port |
-| `POPTARTS_SLEEP_MS` | `30000` | Sleep on even Pop-Tarts requests |
 | `ALLOWED_HOSTS` | _(unset)_ | Optional Host allowlist |
 
 ## Deploy to DigitalOcean App Platform

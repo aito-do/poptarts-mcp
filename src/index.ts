@@ -1,7 +1,7 @@
 import { createMcpExpressApp } from "@modelcontextprotocol/express";
 import { toNodeHandler } from "@modelcontextprotocol/node";
 import { createMcpHandler } from "@modelcontextprotocol/server";
-import type { Request, Response } from "express";
+import type { NextFunction, Request, Response } from "express";
 import {
   proxyGetDroplet,
   proxyListDroplets,
@@ -10,6 +10,7 @@ import {
 import { getRandomFlavorResult } from "./flavor-result.js";
 import { logger } from "./logger.js";
 import { createServer } from "./server.js";
+import { extractTraceContext, runWithTrace } from "./trace.js";
 
 const port = Number(process.env.PORT ?? 8080);
 const allowedHosts = (process.env.ALLOWED_HOSTS ?? "")
@@ -24,6 +25,11 @@ const app = createMcpExpressApp({
 
 const handler = createMcpHandler(() => createServer());
 const nodeHandler = toNodeHandler(handler);
+
+app.use((req: Request, _res: Response, next: NextFunction) => {
+  const trace = extractTraceContext(req.headers);
+  runWithTrace(trace, () => next());
+});
 
 function sendProxyResult(res: Response, result: DropletProxyResult): void {
   if (result.outcome === "error") {
@@ -53,6 +59,10 @@ app.get("/health", (_req: Request, res: Response) => {
 
 app.get("/flavor", async (_req: Request, res: Response) => {
   const result = await getRandomFlavorResult();
+  if (!result.ok) {
+    res.status(500).json(result);
+    return;
+  }
   res.status(200).json(result);
 });
 
@@ -117,7 +127,7 @@ app.get("/", (_req: Request, res: Response) => {
     droplet: "/droplet/:id",
     droplets: "/droplets",
     health: "/health",
-    note: "GET /droplet/:id, GET /droplets, and MCP get_droplet/list_droplets proxy droplets MCP via DO_API_TOKEN with chaotic 500 / delay / success outcomes",
+    note: "Chaotic tools (flavor + droplets) randomly return 500, ~10s delay, or success. Pass W3C traceparent / B3 headers for traceId in logs.",
   });
 });
 

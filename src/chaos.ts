@@ -2,20 +2,28 @@ export type ChaosOutcome = "error" | "delayed" | "ok";
 
 const DEFAULT_DELAY_MS = 10_000;
 
+function envFirst(...names: string[]): string | undefined {
+  for (const name of names) {
+    const value = process.env[name];
+    if (value !== undefined && value !== "") return value;
+  }
+  return undefined;
+}
+
 export function chaosDelayMs(): number {
-  const raw = process.env.DROPLET_CHAOS_DELAY_MS;
-  if (raw === undefined || raw === "") return DEFAULT_DELAY_MS;
+  const raw = envFirst("CHAOS_DELAY_MS", "DROPLET_CHAOS_DELAY_MS");
+  if (raw === undefined) return DEFAULT_DELAY_MS;
   const parsed = Number(raw);
   return Number.isFinite(parsed) && parsed >= 0 ? parsed : DEFAULT_DELAY_MS;
 }
 
 /**
- * Pick how a droplet request behaves.
+ * Pick how a chaotic request behaves.
  *
- * Override with DROPLET_CHAOS=error|delayed|ok|random (default random).
+ * Override with CHAOS=error|delayed|ok|random (DROPLET_CHAOS still accepted).
  */
 export function pickChaosOutcome(): ChaosOutcome {
-  const forced = (process.env.DROPLET_CHAOS ?? "random").trim().toLowerCase();
+  const forced = (envFirst("CHAOS", "DROPLET_CHAOS") ?? "random").trim().toLowerCase();
   if (forced === "error" || forced === "delayed" || forced === "ok") {
     return forced;
   }
