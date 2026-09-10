@@ -27,30 +27,19 @@ Override with `CHAOS=error|delayed|ok|random` (`DROPLET_CHAOS` still accepted).
 
 Tools emit structured JSON logs: **info** on success, **error** on chaotic failure or DO API errors.
 
-If the caller sends OpenTelemetry / distributed-trace headers, `traceId` (and related fields) are included in the log body:
+Each tool log includes:
 
-| Header | Source |
-| --- | --- |
-| `traceparent` / `tracestate` | W3C Trace Context (OTel default) |
-| `x-b3-traceid` / `x-b3-spanid` | Zipkin B3 (fallback) |
+- Chosen `traceId` / `traceparent` / `traceSource`
+- **`headers`**: all inbound HTTP headers (`authorization` redacted)
+- **`mcpMeta`**: MCP `params._meta` when present (common place for W3C context)
 
-Example log line:
+Trace preference order:
 
-```json
-{
-  "level": "info",
-  "msg": "get_random_poptart_flavor succeeded",
-  "time": "2026-09-10T03:50:00.000Z",
-  "traceId": "0af7651916cd43dd8448eb211c80319c",
-  "spanId": "b7ad6b7169203331",
-  "traceparent": "00-0af7651916cd43dd8448eb211c80319c-b7ad6b7169203331-01",
-  "op": "get_random_poptart_flavor",
-  "outcome": "ok",
-  "delayMs": 0,
-  "ok": true
-}
-```
+1. MCP `_meta.traceparent` / `_meta.tracestate` (MCP SDK `TRACEPARENT_META_KEY`)
+2. HTTP `traceparent` / `tracestate`
+3. Zipkin B3 `x-b3-traceid` / `x-b3-spanid`
 
+Gateways (App Platform, Cloudflare, etc.) often inject their own HTTP `traceparent`, which can differ from the caller's ID — check `headers` vs `mcpMeta` in the log to see both.
 ## Local development
 
 ```bash

@@ -10,7 +10,11 @@ import {
 import { getRandomFlavorResult } from "./flavor-result.js";
 import { logger } from "./logger.js";
 import { createServer } from "./server.js";
-import { extractTraceContext, runWithTrace } from "./trace.js";
+import {
+  extractTraceContext,
+  flattenHeaders,
+  runWithRequestContext,
+} from "./trace.js";
 
 const port = Number(process.env.PORT ?? 8080);
 const allowedHosts = (process.env.ALLOWED_HOSTS ?? "")
@@ -27,8 +31,9 @@ const handler = createMcpHandler(() => createServer());
 const nodeHandler = toNodeHandler(handler);
 
 app.use((req: Request, _res: Response, next: NextFunction) => {
-  const trace = extractTraceContext(req.headers);
-  runWithTrace(trace, () => next());
+  const headers = flattenHeaders(req.headers);
+  const trace = extractTraceContext({ headers: req.headers });
+  runWithRequestContext({ trace, headers }, () => next());
 });
 
 function sendProxyResult(res: Response, result: DropletProxyResult): void {
@@ -127,7 +132,7 @@ app.get("/", (_req: Request, res: Response) => {
     droplet: "/droplet/:id",
     droplets: "/droplets",
     health: "/health",
-    note: "Chaotic tools (flavor + droplets) randomly return 500, ~10s delay, or success. Pass W3C traceparent / B3 headers for traceId in logs.",
+    note: "Chaotic tools randomly return 500, ~10s delay, or success. Trace from MCP _meta.traceparent (preferred) or HTTP traceparent/B3; logs include all headers.",
   });
 });
 

@@ -2,7 +2,11 @@ import { McpServer } from "@modelcontextprotocol/server";
 import { z } from "zod";
 import { proxyGetDroplet, proxyListDroplets } from "./droplet-proxy.js";
 import { getRandomFlavorResult } from "./flavor-result.js";
-import { extractTraceContext, runWithTrace } from "./trace.js";
+import {
+  extractTraceContext,
+  flattenHeaders,
+  runWithRequestContext,
+} from "./trace.js";
 
 function toolResultFromProxy(result: { ok: boolean }) {
   const text = JSON.stringify(result, null, 2);
@@ -18,12 +22,23 @@ function toolResultFromProxy(result: { ok: boolean }) {
   };
 }
 
-function withRequestTrace<T>(
-  ctx: { http?: { req?: Request } },
+function withRequestContext<T>(
+  ctx: {
+    http?: { req?: Request };
+    mcpReq?: { _meta?: Record<string, unknown> };
+  },
   fn: () => Promise<T>,
 ): Promise<T> {
-  const trace = extractTraceContext(ctx.http?.req?.headers);
-  return runWithTrace(trace, fn);
+  const headers = flattenHeaders(ctx.http?.req?.headers);
+  const mcpMeta =
+    ctx.mcpReq?._meta && typeof ctx.mcpReq._meta === "object"
+      ? (ctx.mcpReq._meta as Record<string, unknown>)
+      : undefined;
+  const trace = extractTraceContext({
+    headers: ctx.http?.req?.headers,
+    mcpMeta,
+  });
+  return runWithRequestContext({ trace, headers, mcpMeta }, fn);
 }
 
 export function createServer(): McpServer {
@@ -41,7 +56,9 @@ export function createServer(): McpServer {
       inputSchema: z.object({}),
     },
     async (_args, ctx) =>
-      withRequestTrace(ctx, async () => toolResultFromProxy(await getRandomFlavorResult())),
+      withRequestContext(ctx, async () =>
+        toolResultFromProxy(await getRandomFlavorResult()),
+      ),
   );
 
   server.registerTool(
@@ -55,7 +72,7 @@ export function createServer(): McpServer {
       }),
     },
     async ({ id }, ctx) =>
-      withRequestTrace(ctx, async () => toolResultFromProxy(await proxyGetDroplet(id))),
+      withRequestContext(ctx, async () => toolResultFromProxy(await proxyGetDroplet(id))),
   );
 
   server.registerTool(
@@ -81,7 +98,7 @@ export function createServer(): McpServer {
       }),
     },
     async ({ page, perPage }, ctx) =>
-      withRequestTrace(ctx, async () =>
+      withRequestContext(ctx, async () =>
         toolResultFromProxy(await proxyListDroplets({ page, perPage })),
       ),
   );
