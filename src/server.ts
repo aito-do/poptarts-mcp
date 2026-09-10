@@ -1,7 +1,6 @@
 import { McpServer } from "@modelcontextprotocol/server";
 import { z } from "zod";
-import { pickRandomFlavor } from "./flavors.js";
-import { maybeSimulateLatency } from "./latency.js";
+import { getRandomFlavorResult } from "./flavor-result.js";
 
 const flavorOutputSchema = z.object({
   flavor: z.string(),
@@ -26,14 +25,7 @@ export function createServer(): McpServer {
       outputSchema: flavorOutputSchema,
     },
     async () => {
-      const latency = await maybeSimulateLatency();
-      const flavor = pickRandomFlavor();
-      const output = {
-        flavor,
-        callNumber: latency.callNumber,
-        delayed: latency.delayed,
-        sleepMs: latency.sleepMs,
-      };
+      const output = await getRandomFlavorResult();
       return {
         content: [
           {

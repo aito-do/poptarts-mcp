@@ -1,6 +1,7 @@
 /**
- * Alternating latency gate: odd tool calls return immediately; even calls
- * sleep to simulate long-lived / high-latency requests.
+ * Alternating latency gate: odd flavor requests return immediately; even
+ * ones sleep to simulate long-lived / high-latency requests. Shared by the
+ * MCP tool and GET /flavor.
  *
  * Counter is process-local (fine for a single App Platform instance).
  */

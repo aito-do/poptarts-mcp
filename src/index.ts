@@ -2,6 +2,7 @@ import { createMcpExpressApp } from "@modelcontextprotocol/express";
 import { toNodeHandler } from "@modelcontextprotocol/node";
 import { createMcpHandler } from "@modelcontextprotocol/server";
 import type { Request, Response } from "express";
+import { getRandomFlavorResult } from "./flavor-result.js";
 import { createServer } from "./server.js";
 
 const port = Number(process.env.PORT ?? 8080);
@@ -22,12 +23,18 @@ app.get("/health", (_req: Request, res: Response) => {
   res.status(200).json({ ok: true, service: "poptarts-mcp" });
 });
 
+app.get("/flavor", async (_req: Request, res: Response) => {
+  const result = await getRandomFlavorResult();
+  res.status(200).json(result);
+});
+
 app.get("/", (_req: Request, res: Response) => {
   res.status(200).json({
     name: "poptarts-mcp",
     mcp: "/mcp",
+    flavor: "/flavor",
     health: "/health",
-    note: "Streamable HTTP MCP endpoint is POST/GET/DELETE /mcp",
+    note: "Streamable HTTP MCP endpoint is POST/GET/DELETE /mcp; GET /flavor returns the same random flavor payload",
   });
 });
 
@@ -38,6 +45,7 @@ app.all("/mcp", (req: Request, res: Response) => {
 app.listen(port, "0.0.0.0", () => {
   console.log(`poptarts-mcp listening on 0.0.0.0:${port}`);
   console.log(`MCP endpoint: http://0.0.0.0:${port}/mcp`);
+  console.log(`GET flavor: http://0.0.0.0:${port}/flavor`);
   if (allowedHosts.length > 0) {
     console.log(`Allowed hosts: ${allowedHosts.join(", ")}`);
   }

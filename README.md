@@ -4,11 +4,12 @@ Public [Model Context Protocol](https://modelcontextprotocol.io/) server that re
 
 Built to run on [DigitalOcean App Platform](https://docs.digitalocean.com/products/app-platform/).
 
-## Tool
+## Surfaces
 
-| Name | Behavior |
+| Surface | Behavior |
 | --- | --- |
-| `get_random_poptart_flavor` | Picks a random flavor. Odd calls respond immediately; even calls sleep ~30s first. |
+| MCP tool `get_random_poptart_flavor` | Picks a random flavor. Odd calls respond immediately; even calls sleep ~30s first. |
+| `GET /flavor` | Same JSON payload and the same alternating latency counter. |
 
 Response payload:
 
@@ -27,6 +28,7 @@ Response payload:
 npm install
 npm run dev
 # MCP: http://127.0.0.1:8080/mcp
+# Flavor: http://127.0.0.1:8080/flavor
 # Health: http://127.0.0.1:8080/health
 ```
 
@@ -35,7 +37,7 @@ Optional env:
 | Variable | Default | Meaning |
 | --- | --- | --- |
 | `PORT` | `8080` | HTTP listen port |
-| `POPTARTS_SLEEP_MS` | `30000` | Sleep on even tool calls |
+| `POPTARTS_SLEEP_MS` | `30000` | Sleep on even flavor requests (MCP tool + `GET /flavor`) |
 | `ALLOWED_HOSTS` | _(unset)_ | Comma-separated Host allowlist (DNS rebinding protection). Leave unset on App Platform unless you want to lock the hostname. |
 
 ## Deploy to DigitalOcean App Platform
