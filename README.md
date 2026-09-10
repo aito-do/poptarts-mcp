@@ -1,67 +1,76 @@
 # poptarts-mcp
 
-Public [Model Context Protocol](https://modelcontextprotocol.io/) server that returns a random Pop-Tarts flavor over **Streamable HTTP**. Every other tool call sleeps for 30 seconds to simulate latency / long-lived requests.
-
-Built to run on [DigitalOcean App Platform](https://docs.digitalocean.com/products/app-platform/).
+Public [Model Context Protocol](https://modelcontextprotocol.io/) server for DigitalOcean App Platform.
 
 ## Surfaces
 
 | Surface | Behavior |
 | --- | --- |
-| MCP tool `get_random_poptart_flavor` | Picks a random flavor. Odd calls respond immediately; even calls sleep ~30s first. |
-| `GET /flavor` | Same JSON payload and the same alternating latency counter. |
+| MCP tool `get_droplet` | Proxies DigitalOcean droplets MCP **`droplet-get`** (DO API `GET /v2/droplets/{id}`) using `DO_API_TOKEN`. Randomly returns a simulated failure, a ~10s delayed payload, or the droplet info. |
+| `GET /droplet/:id` | Same chaos + payload as `get_droplet` (HTTP **500** on simulated failure). |
+| MCP tool `get_random_poptart_flavor` | Random Pop-Tarts flavor; odd calls fast, even calls sleep ~30s. |
+| `GET /flavor` | Same as the Pop-Tarts tool. |
 
-Response payload:
+### Droplet chaos outcomes
+
+Each droplet request independently picks one of:
+
+1. **error** — simulated failure (`500` on HTTP; MCP `isError`)
+2. **delayed** — sleep ~10s, then fetch the droplet
+3. **ok** — fetch the droplet immediately
+
+Override with `DROPLET_CHAOS=error|delayed|ok|random`.
+
+Success payload shape:
 
 ```json
 {
-  "flavor": "Frosted Strawberry",
-  "callNumber": 2,
-  "delayed": true,
-  "sleepMs": 30000
+  "ok": true,
+  "outcome": "delayed",
+  "delayMs": 10000,
+  "dropletId": 123456,
+  "data": { "droplet": { "...": "..." } }
 }
 ```
 
 ## Local development
 
 ```bash
+export DO_API_TOKEN=dop_v1_...
 npm install
 npm run dev
-# MCP: http://127.0.0.1:8080/mcp
-# Flavor: http://127.0.0.1:8080/flavor
-# Health: http://127.0.0.1:8080/health
+# MCP:     http://127.0.0.1:8080/mcp
+# Droplet: http://127.0.0.1:8080/droplet/123456789
+# Flavor:  http://127.0.0.1:8080/flavor
+# Health:  http://127.0.0.1:8080/health
 ```
 
-Optional env:
+Environment:
 
 | Variable | Default | Meaning |
 | --- | --- | --- |
+| `DO_API_TOKEN` | _(required for droplet)_ | DigitalOcean personal access token (Bearer) |
+| `DROPLET_CHAOS` | `random` | Force `error`, `delayed`, `ok`, or `random` |
+| `DROPLET_CHAOS_DELAY_MS` | `10000` | Sleep when outcome is `delayed` |
 | `PORT` | `8080` | HTTP listen port |
-| `POPTARTS_SLEEP_MS` | `30000` | Sleep on even flavor requests (MCP tool + `GET /flavor`) |
-| `ALLOWED_HOSTS` | _(unset)_ | Comma-separated Host allowlist (DNS rebinding protection). Leave unset on App Platform unless you want to lock the hostname. |
+| `POPTARTS_SLEEP_MS` | `30000` | Sleep on even Pop-Tarts requests |
+| `ALLOWED_HOSTS` | _(unset)_ | Optional Host allowlist |
 
 ## Deploy to DigitalOcean App Platform
 
-1. Push this repo (already public under `aito-do/poptarts-mcp`).
-2. In the DigitalOcean control panel: **Apps → Create App → GitHub → aito-do/poptarts-mcp**.
-3. Autodetect Dockerfile, HTTP port `8080`, health check `/health`.
-4. Or apply the checked-in spec:
+1. Create the app from `aito-do/poptarts-mcp` (Dockerfile, port `8080`, health `/health`).
+2. Set secret `DO_API_TOKEN` in App Platform env (encrypted).
+3. Or: `doctl apps create --spec .do/app.yaml` then set the secret in the UI / `doctl`.
 
 ```bash
 doctl apps create --spec .do/app.yaml
 ```
 
-App Platform allows HTTP requests up to ~100s, so the 30s sleep fits within the platform limit.
-
 ## Connect an MCP client
-
-Point a Streamable HTTP MCP client at:
 
 ```text
 https://<your-app>.ondigitalocean.app/mcp
 ```
-
-Example Cursor `mcp.json` shape (URL transport; exact field names depend on client):
 
 ```json
 {

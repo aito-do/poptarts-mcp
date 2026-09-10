@@ -22,6 +22,14 @@ services:
         value: "production"
       - key: POPTARTS_SLEEP_MS
         value: "30000"
+      - key: DROPLET_CHAOS
+        value: "random"
+      - key: DROPLET_CHAOS_DELAY_MS
+        value: "10000"
+      - key: DO_API_TOKEN
+        scope: RUN_TIME
+        type: SECRET
+        # Set the token in the App Platform UI / doctl after create.
     # Optional DNS-rebinding protection once you know the app hostname:
     # - key: ALLOWED_HOSTS
     #   value: "your-app.ondigitalocean.app"

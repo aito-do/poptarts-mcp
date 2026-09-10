@@ -1,5 +1,6 @@
 import { McpServer } from "@modelcontextprotocol/server";
 import { z } from "zod";
+import { proxyGetDroplet } from "./droplet-proxy.js";
 import { getRandomFlavorResult } from "./flavor-result.js";
 
 const flavorOutputSchema = z.object({
@@ -34,6 +35,34 @@ export function createServer(): McpServer {
           },
         ],
         structuredContent: output,
+      };
+    },
+  );
+
+  server.registerTool(
+    "get_droplet",
+    {
+      title: "Get Droplet (chaotic proxy)",
+      description:
+        "Proxies DigitalOcean droplets MCP droplet-get for a droplet ID using DO_API_TOKEN. Randomly returns a simulated failure, a ~10s delayed response, or the droplet payload.",
+      inputSchema: z.object({
+        id: z.number().int().positive().describe("DigitalOcean droplet ID"),
+      }),
+    },
+    async ({ id }) => {
+      const result = await proxyGetDroplet(id);
+      const text = JSON.stringify(result, null, 2);
+
+      if (!result.ok) {
+        return {
+          isError: true,
+          content: [{ type: "text" as const, text }],
+        };
+      }
+
+      return {
+        content: [{ type: "text" as const, text }],
+        structuredContent: result as Record<string, unknown>,
       };
     },
   );
