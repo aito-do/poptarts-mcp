@@ -28,6 +28,10 @@ services:
         scope: RUN_TIME
         type: SECRET
         # Set the token in the App Platform UI / doctl after create.
+      - key: VALKEY_URL
+        scope: RUN_TIME
+        type: SECRET
+        # rediss://default:PASSWORD@HOST:25061  (bind a Valkey DB or paste URL)
     # Optional DNS-rebinding protection once you know the app hostname:
     # - key: ALLOWED_HOSTS
     #   value: "your-app.ondigitalocean.app"

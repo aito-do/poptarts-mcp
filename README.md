@@ -9,9 +9,13 @@ Public [Model Context Protocol](https://modelcontextprotocol.io/) server for Dig
 | MCP tool `get_droplet` | Proxies DigitalOcean droplets MCP **`droplet-get`** using `DO_API_TOKEN`, with chaos outcomes. |
 | MCP tool `list_droplets` | Proxies **`droplet-list`**. Optional `page` / `perPage`. |
 | MCP tool `get_random_poptart_flavor` | Random Pop-Tarts flavor with the **same** chaos outcomes. |
+| MCP tools `start_valkey_cpu_burn` / `stop_valkey_cpu_burn` / `get_valkey_cpu_burn_status` | Background workers that `EVAL` a tight Lua loop on Valkey (server-side CPU burn). |
 | `GET /droplet/:id` | Same as `get_droplet` (HTTP **500** on simulated failure). |
 | `GET /droplets` | Same as `list_droplets` (`?page=&per_page=`). |
 | `GET /flavor` | Same as `get_random_poptart_flavor`. |
+| `GET /valkey/cpu-burn` | Burn status. |
+| `POST /valkey/cpu-burn/start` | Start burn (`{ iterations?, concurrency?, maxDurationMs? }`). Auto-stops after `maxDurationMs` (default 60s). |
+| `POST /valkey/cpu-burn/stop` | Stop burn. |
 
 ### Chaos outcomes
 
@@ -45,6 +49,7 @@ npm run dev
 # Droplet:  http://127.0.0.1:8080/droplet/123456789
 # Droplets: http://127.0.0.1:8080/droplets
 # Flavor:   http://127.0.0.1:8080/flavor
+# Valkey:   curl -X POST http://127.0.0.1:8080/valkey/cpu-burn/start -H 'content-type: application/json' -d '{}'
 # Health:   http://127.0.0.1:8080/health
 ```
 
@@ -53,11 +58,19 @@ Environment:
 | Variable | Default | Meaning |
 | --- | --- | --- |
 | `DO_API_TOKEN` | _(required for droplet)_ | DigitalOcean personal access token (Bearer) |
+| `VALKEY_URL` | _(required for CPU burn)_ | Valkey URL (`rediss://…`). Also accepts `REDIS_URL` / `DATABASE_URL` |
+| `VALKEY_CPU_BURN_ITERATIONS` | `2000000` | Lua loop iterations per `EVAL` |
+| `VALKEY_CPU_BURN_CONCURRENCY` | `4` | Parallel `EVAL` workers |
+| `VALKEY_CPU_BURN_MAX_DURATION_MS` | `60000` | Auto-stop after this many ms |
 | `CHAOS` | `random` | Force `error_4xx`, `error_5xx`, `error`, `delayed`, `ok`, or `random` |
 | `CHAOS_DELAY_MS` | `10000` | Sleep when outcome is `delayed` |
 | `DROPLET_CHAOS` / `DROPLET_CHAOS_DELAY_MS` | — | Legacy aliases for `CHAOS` / `CHAOS_DELAY_MS` |
 | `PORT` | `8080` | HTTP listen port |
 | `ALLOWED_HOSTS` | _(unset)_ | Optional Host allowlist |
+
+### Valkey CPU burn
+
+`POST /valkey/cpu-burn/start` (or MCP `start_valkey_cpu_burn`) connects with `VALKEY_URL` and runs concurrent background workers that `EVAL` a busy Lua loop on the **Valkey server** — the intended way to spike managed Valkey CPU for Insights / alert testing. Call `stop` or wait for `maxDurationMs`.
 
 ## Deploy to DigitalOcean App Platform
 

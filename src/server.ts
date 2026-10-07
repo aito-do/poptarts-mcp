@@ -6,6 +6,11 @@ import {
   extractTraceContext,
   runWithRequestContext,
 } from "./trace.js";
+import {
+  getValkeyCpuBurnStatus,
+  startValkeyCpuBurn,
+  stopValkeyCpuBurn,
+} from "./valkey-cpu-burn.js";
 
 function toolResultFromProxy(result: { ok: boolean }) {
   const text = JSON.stringify(result, null, 2);
@@ -99,6 +104,89 @@ export function createServer(): McpServer {
       withRequestContext(ctx, async () =>
         toolResultFromProxy(await proxyListDroplets({ page, perPage })),
       ),
+  );
+
+  server.registerTool(
+    "start_valkey_cpu_burn",
+    {
+      title: "Start Valkey CPU burn",
+      description:
+        "Starts background workers that EVAL a tight Lua loop on the configured DigitalOcean Valkey instance, driving high server-side CPU. Requires VALKEY_URL. Auto-stops after maxDurationMs (default 60s).",
+      inputSchema: z.object({
+        iterations: z
+          .number()
+          .int()
+          .positive()
+          .max(50_000_000)
+          .optional()
+          .describe("Lua loop iterations per EVAL (default from env or 2e6)"),
+        concurrency: z
+          .number()
+          .int()
+          .positive()
+          .max(32)
+          .optional()
+          .describe("Parallel EVAL workers (default from env or 4)"),
+        maxDurationMs: z
+          .number()
+          .int()
+          .positive()
+          .max(30 * 60_000)
+          .optional()
+          .describe("Auto-stop after this many ms (default 60000)"),
+      }),
+    },
+    async (args, ctx) =>
+      withRequestContext(ctx, async () => {
+        const result = await startValkeyCpuBurn(args);
+        const text = JSON.stringify(result, null, 2);
+        if (!result.ok) {
+          return { isError: true as const, content: [{ type: "text" as const, text }] };
+        }
+        return {
+          content: [{ type: "text" as const, text }],
+          structuredContent: result as Record<string, unknown>,
+        };
+      }),
+  );
+
+  server.registerTool(
+    "stop_valkey_cpu_burn",
+    {
+      title: "Stop Valkey CPU burn",
+      description: "Stops the background Valkey CPU burn workers if running.",
+      inputSchema: z.object({}),
+    },
+    async (_args, ctx) =>
+      withRequestContext(ctx, async () => {
+        const result = await stopValkeyCpuBurn();
+        return {
+          content: [{ type: "text" as const, text: JSON.stringify(result, null, 2) }],
+          structuredContent: result as Record<string, unknown>,
+        };
+      }),
+  );
+
+  server.registerTool(
+    "get_valkey_cpu_burn_status",
+    {
+      title: "Valkey CPU burn status",
+      description: "Returns whether Valkey CPU burn is running and how many EVALs completed.",
+      inputSchema: z.object({}),
+    },
+    async (_args, ctx) =>
+      withRequestContext(ctx, async () => {
+        const status = getValkeyCpuBurnStatus();
+        return {
+          content: [
+            {
+              type: "text" as const,
+              text: JSON.stringify({ ok: true, status }, null, 2),
+            },
+          ],
+          structuredContent: { ok: true, status } as Record<string, unknown>,
+        };
+      }),
   );
 
   return server;
