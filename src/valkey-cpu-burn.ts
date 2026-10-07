@@ -1,74 +1,81 @@
 import { createClient, type RedisClientType } from "redis";
 import { logger } from "./logger.js";
 
-/** Lua script that burns CPU on the Valkey/Redis server (not the client). */
+/**
+ * CPU-heavy Lua for the Valkey main thread. Each HTTP/MCP request
+ * starts one independent job (one TCP connection) that loops this for
+ * ~5 minutes. Stack many requests to keep the command queue full.
+ */
 const CPU_BURN_LUA = `
-local n = tonumber(ARGV[1]) or 1000000
+local n = tonumber(ARGV[1]) or 2000000
 local x = 0
+local s = "poptarts-valkey-cpu-burn"
 for i = 1, n do
   x = x + i
-  if i % 97 == 0 then
-    x = x ~ i
+  x = x ~ (i * 2654435761)
+  if i % 64 == 0 then
+    s = string.sub(s .. tostring(x), -64)
+    x = x + #s
   end
 end
 return x
 `;
 
 const DEFAULT_ITERATIONS = 2_000_000;
-const DEFAULT_CONCURRENCY = 4;
-const DEFAULT_MAX_DURATION_MS = 60_000;
+const DEFAULT_DURATION_MS = 5 * 60_000;
+const MAX_ITERATIONS = 50_000_000;
+const MAX_DURATION_MS = 60 * 60_000;
+const DEFAULT_MAX_JOBS = 2_500;
+
+export type BurnJobOptions = {
+  iterations?: number;
+  /** How long this job runs. Default 5 minutes. */
+  durationMs?: number;
+};
+
+export type BurnJobSummary = {
+  id: string;
+  startedAt: string;
+  endsAt: string;
+  durationMs: number;
+  iterations: number;
+  evalsCompleted: number;
+  lastError: string | null;
+};
 
 export type ValkeyCpuBurnStatus = {
-  running: boolean;
   configured: boolean;
-  startedAt: string | null;
-  stoppedAt: string | null;
+  activeJobs: number;
+  maxJobs: number;
+  totalStarted: number;
+  totalFinished: number;
+  totalEvalsCompleted: number;
+  jobs: BurnJobSummary[];
+};
+
+type JobRecord = {
+  id: string;
+  startedAt: Date;
+  endsAt: Date;
+  durationMs: number;
   iterations: number;
-  concurrency: number;
-  maxDurationMs: number;
   evalsCompleted: number;
   lastError: string | null;
+  abort: AbortController;
+  promise: Promise<void>;
 };
 
-type BurnOptions = {
-  iterations?: number;
-  concurrency?: number;
-  maxDurationMs?: number;
-};
-
-type BurnState = {
-  running: boolean;
-  abort: AbortController | null;
-  client: RedisClientType | null;
-  startedAt: Date | null;
-  stoppedAt: Date | null;
-  iterations: number;
-  concurrency: number;
-  maxDurationMs: number;
-  evalsCompleted: number;
-  lastError: string | null;
-  loopPromise: Promise<void> | null;
-};
-
-const state: BurnState = {
-  running: false,
-  abort: null,
-  client: null,
-  startedAt: null,
-  stoppedAt: null,
-  iterations: DEFAULT_ITERATIONS,
-  concurrency: DEFAULT_CONCURRENCY,
-  maxDurationMs: DEFAULT_MAX_DURATION_MS,
-  evalsCompleted: 0,
-  lastError: null,
-  loopPromise: null,
-};
+const jobs = new Map<string, JobRecord>();
+let totalStarted = 0;
+let totalFinished = 0;
+let totalEvalsCompleted = 0;
+let jobSeq = 0;
 
 function envInt(name: string, fallback: number): number {
   const raw = process.env[name];
   if (raw === undefined || raw === "") return fallback;
   const n = Number(raw);
-  return Number.isFinite(n) && n > 0 ? Math.floor(n) : fallback;
+  return Number.isFinite(n) && n >= 0 ? Math.floor(n) : fallback;
 }
 
 export function valkeyUrlConfigured(): boolean {
@@ -83,37 +90,51 @@ function resolveValkeyUrl(): string | undefined {
   return undefined;
 }
 
-function clampOptions(options: BurnOptions = {}): Required<BurnOptions> {
+function maxJobs(): number {
+  return Math.max(1, envInt("VALKEY_CPU_BURN_MAX_JOBS", DEFAULT_MAX_JOBS));
+}
+
+function clampOptions(options: BurnJobOptions = {}): Required<BurnJobOptions> {
   const iterations = Math.min(
-    Math.max(1, options.iterations ?? envInt("VALKEY_CPU_BURN_ITERATIONS", DEFAULT_ITERATIONS)),
-    50_000_000,
+    Math.max(
+      1,
+      options.iterations ?? envInt("VALKEY_CPU_BURN_ITERATIONS", DEFAULT_ITERATIONS),
+    ),
+    MAX_ITERATIONS,
   );
-  const concurrency = Math.min(
-    Math.max(1, options.concurrency ?? envInt("VALKEY_CPU_BURN_CONCURRENCY", DEFAULT_CONCURRENCY)),
-    32,
-  );
-  const maxDurationMs = Math.min(
+  const durationMs = Math.min(
     Math.max(
       1_000,
-      options.maxDurationMs ??
-        envInt("VALKEY_CPU_BURN_MAX_DURATION_MS", DEFAULT_MAX_DURATION_MS),
+      options.durationMs ?? envInt("VALKEY_CPU_BURN_DURATION_MS", DEFAULT_DURATION_MS),
     ),
-    30 * 60_000,
+    MAX_DURATION_MS,
   );
-  return { iterations, concurrency, maxDurationMs };
+  return { iterations, durationMs };
+}
+
+function summarizeJob(job: JobRecord): BurnJobSummary {
+  return {
+    id: job.id,
+    startedAt: job.startedAt.toISOString(),
+    endsAt: job.endsAt.toISOString(),
+    durationMs: job.durationMs,
+    iterations: job.iterations,
+    evalsCompleted: job.evalsCompleted,
+    lastError: job.lastError,
+  };
 }
 
 export function getValkeyCpuBurnStatus(): ValkeyCpuBurnStatus {
+  const active = [...jobs.values()].map(summarizeJob);
   return {
-    running: state.running,
     configured: valkeyUrlConfigured(),
-    startedAt: state.startedAt?.toISOString() ?? null,
-    stoppedAt: state.stoppedAt?.toISOString() ?? null,
-    iterations: state.iterations,
-    concurrency: state.concurrency,
-    maxDurationMs: state.maxDurationMs,
-    evalsCompleted: state.evalsCompleted,
-    lastError: state.lastError,
+    activeJobs: active.length,
+    maxJobs: maxJobs(),
+    totalStarted,
+    totalFinished,
+    totalEvalsCompleted,
+    // Cap listing so status stays usable under thousands of jobs.
+    jobs: active.slice(0, 100),
   };
 }
 
@@ -125,76 +146,119 @@ async function connectClient(): Promise<RedisClientType> {
     );
   }
 
-  const client = createClient({ url }) as RedisClientType;
+  const client = createClient({
+    url,
+    socket: {
+      connectTimeout: 15_000,
+      keepAlive: true,
+      reconnectStrategy: false,
+    },
+  }) as RedisClientType;
   client.on("error", (err: Error) => {
-    state.lastError = err.message;
     logger.error("valkey client error", { message: err.message });
   });
   await client.connect();
   return client;
 }
 
-async function runWorker(
-  client: RedisClientType,
-  signal: AbortSignal,
-  iterations: number,
-): Promise<void> {
-  while (!signal.aborted) {
+async function closeClient(client: RedisClientType): Promise<void> {
+  try {
+    await client.quit();
+  } catch {
     try {
-      await client.eval(CPU_BURN_LUA, {
-        arguments: [String(iterations)],
-      });
-      state.evalsCompleted += 1;
-    } catch (err) {
-      if (signal.aborted) return;
-      const message = err instanceof Error ? err.message : "Unknown error";
-      state.lastError = message;
-      logger.error("valkey cpu burn eval failed", { message });
-      // Brief pause so a hard failure does not spin the local event loop.
-      await new Promise((r) => setTimeout(r, 250));
+      client.destroy();
+    } catch {
+      /* ignore */
     }
   }
 }
 
-async function runBurnLoop(
-  client: RedisClientType,
-  abort: AbortController,
-  options: Required<BurnOptions>,
+async function runJob(
+  job: JobRecord,
+  signal: AbortSignal,
 ): Promise<void> {
-  const { iterations, concurrency, maxDurationMs } = options;
-  const timer = setTimeout(() => {
-    logger.info("valkey cpu burn max duration reached", { maxDurationMs });
-    abort.abort();
-  }, maxDurationMs);
-
-  const workers = Array.from({ length: concurrency }, () =>
-    runWorker(client, abort.signal, iterations),
-  );
-
+  let client: RedisClientType | undefined;
   try {
-    await Promise.all(workers);
+    client = await connectClient();
+    let sha = (await client.scriptLoad(CPU_BURN_LUA)) as string;
+
+    while (!signal.aborted) {
+      try {
+        await client.evalSha(sha, {
+          arguments: [String(job.iterations)],
+        });
+        job.evalsCompleted += 1;
+        totalEvalsCompleted += 1;
+      } catch (err) {
+        if (signal.aborted) return;
+        const message = err instanceof Error ? err.message : "Unknown error";
+        job.lastError = message;
+        if (message.includes("NOSCRIPT")) {
+          try {
+            sha = (await client.scriptLoad(CPU_BURN_LUA)) as string;
+            continue;
+          } catch (reloadErr) {
+            job.lastError =
+              reloadErr instanceof Error ? reloadErr.message : "Unknown error";
+            logger.error("valkey cpu burn script reload failed", {
+              jobId: job.id,
+              message: job.lastError,
+            });
+          }
+        } else {
+          logger.error("valkey cpu burn eval failed", {
+            jobId: job.id,
+            message,
+          });
+        }
+        await new Promise((r) => setTimeout(r, 50));
+      }
+    }
+  } catch (err) {
+    const message = err instanceof Error ? err.message : "Unknown error";
+    job.lastError = message;
+    logger.error("valkey cpu burn job failed", { jobId: job.id, message });
   } finally {
-    clearTimeout(timer);
+    if (client) await closeClient(client);
   }
 }
 
 export type StartValkeyCpuBurnResult =
-  | { ok: true; status: ValkeyCpuBurnStatus; message: string }
-  | { ok: false; error: string; message: string; status: ValkeyCpuBurnStatus };
-
-export async function startValkeyCpuBurn(
-  options: BurnOptions = {},
-): Promise<StartValkeyCpuBurnResult> {
-  if (state.running) {
-    return {
-      ok: false,
-      error: "already_running",
-      message: "Valkey CPU burn is already running",
-      status: getValkeyCpuBurnStatus(),
+  | {
+      ok: true;
+      jobId: string;
+      message: string;
+      status: ValkeyCpuBurnStatus;
+    }
+  | {
+      ok: false;
+      error: string;
+      message: string;
+      status: ValkeyCpuBurnStatus;
     };
-  }
+
+/**
+ * Start one stackable 5-minute (default) burn job.
+ * Safe to call concurrently — each request adds another job.
+ */
+export function startValkeyCpuBurn(
+  options: BurnJobOptions = {},
+): StartValkeyCpuBurnResult {
+  const rawParams = { ...options };
+  const clamped = clampOptions(options);
+
+  logger.info("valkey cpu burn request", {
+    params: rawParams,
+    resolved: clamped,
+    activeJobs: jobs.size,
+    maxJobs: maxJobs(),
+  });
 
   if (!valkeyUrlConfigured()) {
+    logger.error("valkey cpu burn rejected", {
+      error: "not_configured",
+      params: rawParams,
+    });
     return {
       ok: false,
       error: "not_configured",
@@ -203,69 +267,81 @@ export async function startValkeyCpuBurn(
     };
   }
 
-  const clamped = clampOptions(options);
-  let client: RedisClientType;
-  try {
-    client = await connectClient();
-  } catch (err) {
-    const message = err instanceof Error ? err.message : "Unknown error";
-    state.lastError = message;
+  if (jobs.size >= maxJobs()) {
+    logger.error("valkey cpu burn rejected", {
+      error: "max_jobs",
+      params: rawParams,
+      activeJobs: jobs.size,
+      maxJobs: maxJobs(),
+    });
     return {
       ok: false,
-      error: "connect_failed",
-      message,
+      error: "max_jobs",
+      message: `Too many active burn jobs (max ${maxJobs()})`,
       status: getValkeyCpuBurnStatus(),
     };
   }
 
+  jobSeq += 1;
+  const id = `burn-${Date.now()}-${jobSeq}`;
+  const startedAt = new Date();
+  const endsAt = new Date(startedAt.getTime() + clamped.durationMs);
   const abort = new AbortController();
-  state.running = true;
-  state.abort = abort;
-  state.client = client;
-  state.startedAt = new Date();
-  state.stoppedAt = null;
-  state.iterations = clamped.iterations;
-  state.concurrency = clamped.concurrency;
-  state.maxDurationMs = clamped.maxDurationMs;
-  state.evalsCompleted = 0;
-  state.lastError = null;
 
-  logger.info("valkey cpu burn started", {
+  const job: JobRecord = {
+    id,
+    startedAt,
+    endsAt,
+    durationMs: clamped.durationMs,
     iterations: clamped.iterations,
-    concurrency: clamped.concurrency,
-    maxDurationMs: clamped.maxDurationMs,
-  });
+    evalsCompleted: 0,
+    lastError: null,
+    abort,
+    promise: Promise.resolve(),
+  };
 
-  state.loopPromise = runBurnLoop(client, abort, clamped)
+  const timer = setTimeout(() => {
+    logger.info("valkey cpu burn job duration reached", {
+      jobId: id,
+      durationMs: clamped.durationMs,
+      evalsCompleted: job.evalsCompleted,
+    });
+    abort.abort();
+  }, clamped.durationMs);
+
+  job.promise = runJob(job, abort.signal)
     .catch((err) => {
       const message = err instanceof Error ? err.message : "Unknown error";
-      state.lastError = message;
-      logger.error("valkey cpu burn loop crashed", { message });
+      job.lastError = message;
+      logger.error("valkey cpu burn job crashed", { jobId: id, message });
     })
-    .finally(async () => {
-      state.running = false;
-      state.stoppedAt = new Date();
-      state.abort = null;
-      state.loopPromise = null;
-      try {
-        await client.quit();
-      } catch {
-        try {
-          client.destroy();
-        } catch {
-          /* ignore */
-        }
-      }
-      state.client = null;
-      logger.info("valkey cpu burn stopped", {
-        evalsCompleted: state.evalsCompleted,
-        lastError: state.lastError,
+    .finally(() => {
+      clearTimeout(timer);
+      jobs.delete(id);
+      totalFinished += 1;
+      logger.info("valkey cpu burn job stopped", {
+        jobId: id,
+        evalsCompleted: job.evalsCompleted,
+        lastError: job.lastError,
+        activeJobs: jobs.size,
       });
     });
 
+  jobs.set(id, job);
+  totalStarted += 1;
+
+  logger.info("valkey cpu burn job started", {
+    jobId: id,
+    params: rawParams,
+    resolved: clamped,
+    endsAt: endsAt.toISOString(),
+    activeJobs: jobs.size,
+  });
+
   return {
     ok: true,
-    message: "Valkey CPU burn started (background workers)",
+    jobId: id,
+    message: `Burn job started for ${clamped.durationMs}ms (stacks with other jobs)`,
     status: getValkeyCpuBurnStatus(),
   };
 }
@@ -273,26 +349,27 @@ export async function startValkeyCpuBurn(
 export type StopValkeyCpuBurnResult = {
   ok: true;
   message: string;
+  stopped: number;
   status: ValkeyCpuBurnStatus;
 };
 
+/** Abort every active burn job. */
 export async function stopValkeyCpuBurn(): Promise<StopValkeyCpuBurnResult> {
-  if (!state.running || !state.abort) {
-    return {
-      ok: true,
-      message: "Valkey CPU burn was not running",
-      status: getValkeyCpuBurnStatus(),
-    };
+  const active = [...jobs.values()];
+  logger.info("valkey cpu burn stop-all request", {
+    activeJobs: active.length,
+  });
+
+  for (const job of active) {
+    job.abort.abort();
   }
 
-  state.abort.abort();
-  if (state.loopPromise) {
-    await state.loopPromise.catch(() => undefined);
-  }
+  await Promise.all(active.map((j) => j.promise.catch(() => undefined)));
 
   return {
     ok: true,
-    message: "Valkey CPU burn stopped",
+    message: active.length === 0 ? "No burn jobs were running" : `Stopped ${active.length} burn job(s)`,
+    stopped: active.length,
     status: getValkeyCpuBurnStatus(),
   };
 }

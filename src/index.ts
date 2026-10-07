@@ -59,23 +59,27 @@ function sendProxyResult(res: Response, result: DropletProxyResult): void {
 }
 
 app.get("/health", (_req: Request, res: Response) => {
+  const burn = getValkeyCpuBurnStatus();
   res.status(200).json({
     ok: true,
     service: "poptarts-mcp",
     doTokenConfigured: Boolean(process.env.DO_API_TOKEN?.trim()),
     valkeyConfigured: valkeyUrlConfigured(),
-    valkeyCpuBurnRunning: getValkeyCpuBurnStatus().running,
+    valkeyCpuBurnActiveJobs: burn.activeJobs,
   });
 });
 
-app.get("/valkey/cpu-burn", (_req: Request, res: Response) => {
-  res.status(200).json({ ok: true, status: getValkeyCpuBurnStatus() });
-});
-
-app.post("/valkey/cpu-burn/start", async (req: Request, res: Response) => {
-  const body = (req.body ?? {}) as {
+function parseBurnBody(body: unknown): {
+  ok: true;
+  options: { iterations?: number; durationMs?: number };
+} | {
+  ok: false;
+  error: string;
+  message: string;
+} {
+  const raw = (body ?? {}) as {
     iterations?: unknown;
-    concurrency?: unknown;
+    durationMs?: unknown;
     maxDurationMs?: unknown;
   };
 
@@ -85,30 +89,57 @@ app.post("/valkey/cpu-burn/start", async (req: Request, res: Response) => {
     return Number.isInteger(n) && n > 0 ? n : Number.NaN;
   };
 
-  const iterations = asPositiveInt(body.iterations);
-  const concurrency = asPositiveInt(body.concurrency);
-  const maxDurationMs = asPositiveInt(body.maxDurationMs);
+  const iterations = asPositiveInt(raw.iterations);
+  // Accept durationMs or legacy maxDurationMs.
+  const durationMs = asPositiveInt(
+    raw.durationMs !== undefined ? raw.durationMs : raw.maxDurationMs,
+  );
 
-  if (
-    Number.isNaN(iterations) ||
-    Number.isNaN(concurrency) ||
-    Number.isNaN(maxDurationMs)
-  ) {
-    res.status(400).json({
+  if (Number.isNaN(iterations) || Number.isNaN(durationMs)) {
+    return {
       ok: false,
       error: "invalid_options",
-      message: "iterations, concurrency, and maxDurationMs must be positive integers when set",
+      message: "iterations and durationMs must be positive integers when set",
+    };
+  }
+
+  return {
+    ok: true,
+    options: {
+      ...(iterations !== undefined ? { iterations } : {}),
+      ...(durationMs !== undefined ? { durationMs } : {}),
+    },
+  };
+}
+
+function handleCpuBurnStart(req: Request, res: Response): void {
+  const parsed = parseBurnBody(req.body);
+  if (!parsed.ok) {
+    logger.info("valkey cpu burn request", {
+      params: req.body ?? {},
+      error: parsed.error,
     });
+    res.status(400).json({ ok: false, error: parsed.error, message: parsed.message });
     return;
   }
 
-  const result = await startValkeyCpuBurn({
-    ...(iterations !== undefined ? { iterations } : {}),
-    ...(concurrency !== undefined ? { concurrency } : {}),
-    ...(maxDurationMs !== undefined ? { maxDurationMs } : {}),
-  });
+  const result = startValkeyCpuBurn(parsed.options);
+  const status =
+    result.ok ? 202 : result.error === "max_jobs" ? 503 : 400;
+  res.status(status).json(result);
+}
 
-  res.status(result.ok ? 202 : result.error === "already_running" ? 409 : 400).json(result);
+app.get("/valkey/cpu-burn", (_req: Request, res: Response) => {
+  res.status(200).json({ ok: true, status: getValkeyCpuBurnStatus() });
+});
+
+// Each POST starts a new stackable 5-minute burn job.
+app.post("/valkey/cpu-burn", (req: Request, res: Response) => {
+  handleCpuBurnStart(req, res);
+});
+
+app.post("/valkey/cpu-burn/start", (req: Request, res: Response) => {
+  handleCpuBurnStart(req, res);
 });
 
 app.post("/valkey/cpu-burn/stop", async (_req: Request, res: Response) => {
@@ -187,11 +218,11 @@ app.get("/", (_req: Request, res: Response) => {
     droplets: "/droplets",
     valkeyCpuBurn: {
       status: "GET /valkey/cpu-burn",
-      start: "POST /valkey/cpu-burn/start",
-      stop: "POST /valkey/cpu-burn/stop",
+      start: "POST /valkey/cpu-burn (or /start) — each call stacks a 5m job",
+      stop: "POST /valkey/cpu-burn/stop — abort all jobs",
     },
     health: "/health",
-    note: "Chaotic tools randomly return 4xx, 5xx, ~10s delay, or success. POST /valkey/cpu-burn/start runs background Lua EVALs to burn Valkey CPU. Trace from MCP _meta.traceparent (preferred) or HTTP traceparent/B3.",
+    note: "Chaotic tools randomly return 4xx, 5xx, ~10s delay, or success. POST /valkey/cpu-burn stacks a 5-minute Valkey CPU burn job per request. Trace from MCP _meta.traceparent (preferred) or HTTP traceparent/B3.",
   });
 });
 

@@ -109,9 +109,9 @@ export function createServer(): McpServer {
   server.registerTool(
     "start_valkey_cpu_burn",
     {
-      title: "Start Valkey CPU burn",
+      title: "Start Valkey CPU burn job",
       description:
-        "Starts background workers that EVAL a tight Lua loop on the configured DigitalOcean Valkey instance, driving high server-side CPU. Requires VALKEY_URL. Auto-stops after maxDurationMs (default 60s).",
+        "Starts one stackable Valkey CPU burn job (one TCP connection, Lua EVAL loop). Default duration 5 minutes. Call repeatedly — jobs stack and keep the Valkey command thread busy. Requires VALKEY_URL.",
       inputSchema: z.object({
         iterations: z
           .number()
@@ -119,26 +119,19 @@ export function createServer(): McpServer {
           .positive()
           .max(50_000_000)
           .optional()
-          .describe("Lua loop iterations per EVAL (default from env or 2e6)"),
-        concurrency: z
+          .describe("Lua loop iterations per EVAL (default 2e6)"),
+        durationMs: z
           .number()
           .int()
           .positive()
-          .max(32)
+          .max(60 * 60_000)
           .optional()
-          .describe("Parallel EVAL workers (default from env or 4)"),
-        maxDurationMs: z
-          .number()
-          .int()
-          .positive()
-          .max(30 * 60_000)
-          .optional()
-          .describe("Auto-stop after this many ms (default 60000)"),
+          .describe("How long this job runs (default 300000 = 5m)"),
       }),
     },
     async (args, ctx) =>
       withRequestContext(ctx, async () => {
-        const result = await startValkeyCpuBurn(args);
+        const result = startValkeyCpuBurn(args);
         const text = JSON.stringify(result, null, 2);
         if (!result.ok) {
           return { isError: true as const, content: [{ type: "text" as const, text }] };
@@ -153,8 +146,8 @@ export function createServer(): McpServer {
   server.registerTool(
     "stop_valkey_cpu_burn",
     {
-      title: "Stop Valkey CPU burn",
-      description: "Stops the background Valkey CPU burn workers if running.",
+      title: "Stop all Valkey CPU burn jobs",
+      description: "Aborts every active stackable Valkey CPU burn job.",
       inputSchema: z.object({}),
     },
     async (_args, ctx) =>
@@ -171,7 +164,7 @@ export function createServer(): McpServer {
     "get_valkey_cpu_burn_status",
     {
       title: "Valkey CPU burn status",
-      description: "Returns whether Valkey CPU burn is running and how many EVALs completed.",
+      description: "Returns active burn job count and a sample of running jobs.",
       inputSchema: z.object({}),
     },
     async (_args, ctx) =>
