@@ -6,13 +6,16 @@ import { logger } from "./logger.js";
  * starts one independent job (one TCP connection) that loops this for
  * ~5 minutes. Stack many requests to keep the command queue full.
  */
+// Valkey/Redis embed Lua 5.1 — no bitwise `~` / `bit` ops. Keep this 5.1-safe.
 const CPU_BURN_LUA = `
 local n = tonumber(ARGV[1]) or 2000000
 local x = 0
 local s = "poptarts-valkey-cpu-burn"
 for i = 1, n do
-  x = x + i
-  x = x ~ (i * 2654435761)
+  x = x + i * 2654435761
+  if x > 1e15 then
+    x = x % 2147483647
+  end
   if i % 64 == 0 then
     s = string.sub(s .. tostring(x), -64)
     x = x + #s
